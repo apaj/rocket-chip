@@ -93,6 +93,7 @@ class PTE(implicit p: Parameters) extends CoreBundle()(p) {
   def sr(dummy: Int = 0) = leaf() && r
   def sw(dummy: Int = 0) = leaf() && w && d
   def sx(dummy: Int = 0) = leaf() && x
+  def isFullPerm(dummy: Int = 0) = uw() && ux()
 }
 
 class L2TLBEntry(nSets: Int)(implicit p: Parameters) extends CoreBundle()(p)
@@ -519,7 +520,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
         val success = pte.v && !ae && !gf
         l2_refill := success && count === pgLevels-1 && !r_req.need_gpa &&
           (!r_req.vstage1 && !r_req.stage2 ||
-           do_both_stages && aux_count === pgLevels-1 && isFullPermPTE(pte))
+           do_both_stages && aux_count === pgLevels-1 && pte.isFullPerm())
         count := max_count
 
         when (pageGranularityPMPs && !(count === pgLevels-1 && (!do_both_stages || aux_count === pgLevels-1))) {
@@ -568,10 +569,6 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
 
   private def ccover(cond: Bool, label: String, desc: String)(implicit sourceInfo: SourceInfo) =
     if (usingVM) cover(cond, s"PTW_$label", "MemorySystem;;" + desc)
-
-  private def isFullPermPTE(p: PTE) = {
-    p.uw() && p.ux() && !p.g
-  }
 
   private def makePTE(ppn: UInt, default: PTE) = {
     val pte = Wire(init = default)
