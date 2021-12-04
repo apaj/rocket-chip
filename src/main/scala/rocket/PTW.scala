@@ -23,6 +23,7 @@ class PTWReq(implicit p: Parameters) extends CoreBundle()(p) {
 
 class PTWResp(implicit p: Parameters) extends CoreBundle()(p) {
   val ae = Bool()
+  val pf = Bool()
   val pte = new PTE
   val level = UInt(width = log2Ceil(pgLevels))
   val fragmented_superpage = Bool()
@@ -125,6 +126,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   val invalidated = Reg(Bool())
   val count = Reg(UInt(width = log2Up(pgLevels)))
   val resp_ae = RegNext(false.B)
+  val resp_pf = RegNext(false.B)
   val resp_fragmented_superpage = RegNext(false.B)
 
   val r_req = Reg(new PTWReq)
@@ -316,6 +318,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   for (i <- 0 until io.requestor.size) {
     io.requestor(i).resp.valid := resp_valid(i)
     io.requestor(i).resp.bits.ae := resp_ae
+    io.requestor(i).resp.bits.pf := resp_pf
     io.requestor(i).resp.bits.pte := r_pte
     io.requestor(i).resp.bits.level := count
     io.requestor(i).resp.bits.homogeneous := homogeneous || pageGranularityPMPs
@@ -362,6 +365,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
       next_state := s_ready
       resp_valid(r_req_dest) := true
       resp_ae := false
+      resp_pf := false
       when (!homogeneous) {
         count := pgLevels-1
         resp_fragmented_superpage := true
@@ -387,6 +391,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     next_state := s_ready
     resp_valid(r_req_dest) := true
     resp_ae := false
+    resp_pf := false
     count := pgLevels-1
   }
   when (mem_resp_valid) {
@@ -396,9 +401,9 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
       count := count + 1
     }.otherwise {
       l2_refill := pte.v && !invalid_paddr && count === pgLevels-1
-      val ae = pte.v && invalid_paddr
-      resp_ae := ae
-      when (pageGranularityPMPs && count =/= pgLevels-1 && !ae) {
+      val pf = pte.v && invalid_paddr
+      resp_pf := pf
+      when (pageGranularityPMPs && count =/= pgLevels-1 && !pf) {
         next_state := s_fragment_superpage
       }.otherwise {
         next_state := s_ready

@@ -58,6 +58,7 @@ class TLBEntryData(implicit p: Parameters) extends CoreBundle()(p) {
   val u = Bool()
   val g = Bool()
   val ae = Bool()
+  val pf = Bool()
   val sw = Bool()
   val sx = Bool()
   val sr = Bool()
@@ -223,6 +224,7 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
     newEntry.u := pte.u
     newEntry.g := pte.g && pte.v
     newEntry.ae := io.ptw.resp.bits.ae
+    newEntry.pf := io.ptw.resp.bits.pf
     newEntry.sr := pte.sr()
     newEntry.sw := pte.sw()
     newEntry.sx := pte.sx()
@@ -262,14 +264,15 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
 
   val nPhysicalEntries = 1 + special_entry.size
   val ptw_ae_array = Cat(false.B, entries.map(_.ae).asUInt)
+  val ptw_pf_array = Cat(false.B, entries.map(_.pf).asUInt)
   val priv_rw_ok = Mux(!priv_s || io.ptw.status.sum, entries.map(_.u).asUInt, 0.U) | Mux(priv_s, ~entries.map(_.u).asUInt, 0.U)
   val priv_x_ok = Mux(priv_s, ~entries.map(_.u).asUInt, entries.map(_.u).asUInt)
   val r_array = Cat(true.B, priv_rw_ok & (entries.map(_.sr).asUInt | Mux(io.ptw.status.mxr, entries.map(_.sx).asUInt, UInt(0))))
   val w_array = Cat(true.B, priv_rw_ok & entries.map(_.sw).asUInt)
   val x_array = Cat(true.B, priv_x_ok & entries.map(_.sx).asUInt)
-  val pr_array = Cat(Fill(nPhysicalEntries, prot_r), normal_entries.map(_.pr).asUInt) & ~ptw_ae_array
-  val pw_array = Cat(Fill(nPhysicalEntries, prot_w), normal_entries.map(_.pw).asUInt) & ~ptw_ae_array
-  val px_array = Cat(Fill(nPhysicalEntries, prot_x), normal_entries.map(_.px).asUInt) & ~ptw_ae_array
+  val pr_array = Cat(Fill(nPhysicalEntries, prot_r), normal_entries.map(_.pr).asUInt) & ~(ptw_ae_array | ptw_pf_array)
+  val pw_array = Cat(Fill(nPhysicalEntries, prot_w), normal_entries.map(_.pw).asUInt) & ~(ptw_ae_array | ptw_pf_array)
+  val px_array = Cat(Fill(nPhysicalEntries, prot_x), normal_entries.map(_.px).asUInt) & ~(ptw_ae_array | ptw_pf_array)
   val eff_array = Cat(Fill(nPhysicalEntries, prot_eff), normal_entries.map(_.eff).asUInt)
   val c_array = Cat(Fill(nPhysicalEntries, cacheable), normal_entries.map(_.c).asUInt)
   val ppp_array = Cat(Fill(nPhysicalEntries, prot_pp), normal_entries.map(_.ppp).asUInt)
@@ -317,9 +320,9 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
     Mux(cmd_lrsc, ~0.U(pal_array.getWidth.W), 0.U)
   val ma_ld_array = Mux(misaligned && cmd_read, ~eff_array, 0.U)
   val ma_st_array = Mux(misaligned && cmd_write, ~eff_array, 0.U)
-  val pf_ld_array = Mux(cmd_read, ~(r_array | ptw_ae_array), 0.U)
-  val pf_st_array = Mux(cmd_write_perms, ~(w_array | ptw_ae_array), 0.U)
-  val pf_inst_array = ~(x_array | ptw_ae_array)
+  val pf_ld_array = Mux(cmd_read, ~(r_array | ~ptw_pf_array | ptw_ae_array), 0.U)
+  val pf_st_array = Mux(cmd_write_perms, ~(w_array | ~ptw_pf_array | ptw_ae_array), 0.U)
+  val pf_inst_array = ~(x_array | ~ptw_pf_array | ptw_ae_array)
 
   val tlb_hit = real_hits.orR
   val tlb_miss = vm_enabled && !bad_va && !tlb_hit
