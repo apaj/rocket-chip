@@ -59,7 +59,8 @@ class DatapathPTWIO(implicit p: Parameters) extends CoreBundle()(p)
 }
 
 class PTE(implicit p: Parameters) extends CoreBundle()(p) {
-  val ppn = UInt(width = 54)
+  val reserved_for_future = UInt(width = 10)
+  val ppn = UInt(width = 44)
   val reserved_for_software = Bits(width = 2)
   val d = Bool()
   val a = Bool()
@@ -144,7 +145,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     }
   }
 
-  val (pte, invalid_paddr) = {
+  val (pte, invalid_paddr, invalid_reserved) = {
     val tmp = new PTE().fromBits(mem_resp_data)
     val res = Wire(init = tmp)
     res.ppn := tmp.ppn(ppnBits-1, 0)
@@ -153,9 +154,9 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
       for (i <- 0 until pgLevels-1)
         when (count <= i && tmp.ppn((pgLevels-1-i)*pgLevelBits-1, (pgLevels-2-i)*pgLevelBits) =/= 0) { res.v := false }
     }
-    (res, (tmp.ppn >> ppnBits) =/= 0)
+    (res, (tmp.ppn >> ppnBits) =/= 0, tmp.reserved_for_future =/= 0)
   }
-  val traverse = pte.table() && !invalid_paddr && count < pgLevels-1
+  val traverse = pte.table() && !invalid_paddr && !invalid_reserved && count < pgLevels-1
   val pte_addr = if (!usingVM) 0.U else {
     val vpn_idxs = (0 until pgLevels).map(i => (r_req.addr >> (pgLevels-i-1)*pgLevelBits)(pgLevelBits-1,0))
     val vpn_idx = vpn_idxs(count)
@@ -400,10 +401,12 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
       next_state := s_req
       count := count + 1
     }.otherwise {
-      l2_refill := pte.v && !invalid_paddr && count === pgLevels-1
-      val pf = pte.v && invalid_paddr
+      l2_refill := pte.v && !invalid_paddr && !invalid_reserved && count === pgLevels-1
+      val ae = pte.v && invalid_paddr
+      val pf = pte.v && invalid_reserved
+      resp_ae := ae
       resp_pf := pf
-      when (pageGranularityPMPs && count =/= pgLevels-1 && !pf) {
+      when (pageGranularityPMPs && count =/= pgLevels-1 && !ae && !pf) {
         next_state := s_fragment_superpage
       }.otherwise {
         next_state := s_ready
@@ -418,8 +421,9 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
 
   for (i <- 0 until pgLevels) {
     val leaf = mem_resp_valid && !traverse && count === i
-    ccover(leaf && pte.v && !invalid_paddr, s"L$i", s"successful page-table access, level $i")
+    ccover(leaf && pte.v && !invalid_paddr && !invalid_reserved, s"L$i", s"successful page-table access, level $i")
     ccover(leaf && pte.v && invalid_paddr, s"L${i}_BAD_PPN_MSB", s"PPN too large, level $i")
+    ccover(leaf && pte.v && invalid_reserved, s"L${i}_BAD_RSV_MSB", s"reserved MSBs set, level $i")
     ccover(leaf && !mem_resp_data(0), s"L${i}_INVALID_PTE", s"page not present, level $i")
     if (i != pgLevels-1)
       ccover(leaf && !pte.v && mem_resp_data(0), s"L${i}_BAD_PPN_LSB", s"PPN LSBs not zero, level $i")
