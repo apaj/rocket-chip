@@ -59,8 +59,7 @@ class DatapathPTWIO(implicit p: Parameters) extends CoreBundle()(p)
 }
 
 class PTE(implicit p: Parameters) extends CoreBundle()(p) {
-  val n = Bool()
-  val reserved_for_future = UInt(width = 9)
+  val reserved_for_future = UInt(width = 10)
   val ppn = UInt(width = 44)
   val reserved_for_software = Bits(width = 2)
   val d = Bool()
@@ -72,7 +71,7 @@ class PTE(implicit p: Parameters) extends CoreBundle()(p) {
   val r = Bool()
   val v = Bool()
 
-  def table(dummy: Int = 0) = v && !r && !w && !x && !d && !a && !u && !n && reserved_for_future === 0
+  def table(dummy: Int = 0) = v && !r && !w && !x && !d && !a && !u && reserved_for_future === 0
   def leaf(dummy: Int = 0) = v && (r || (x && !w)) && a
   def ur(dummy: Int = 0) = sr() && u
   def uw(dummy: Int = 0) = sw() && u
